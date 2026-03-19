@@ -1,0 +1,2 @@
+services:
+    App\Infrastructure\Logger\LoggerInterface: '@App\Infrastructure\Logger\NullLogger'
