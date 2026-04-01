@@ -11,7 +11,10 @@ final class NotificationControllerExtendedTest extends WebTestCase
     public function testNotificationEndpointReturnsErrorForEmptyBody(): void
     {
         $client = static::createClient();
-        $client->request('POST', '/api/v1/notifications', [], [], ['CONTENT_TYPE' => 'application/json'], '');
+        $client->request('POST', '/api/v1/notifications', [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X-API-Key' => 'test-api-key',
+        ], '');
 
         self::assertResponseStatusCodeSame(400);
         self::assertResponseHeaderSame('content-type', 'application/problem+json');
@@ -20,7 +23,10 @@ final class NotificationControllerExtendedTest extends WebTestCase
     public function testNotificationEndpointReturnsErrorForInvalidJson(): void
     {
         $client = static::createClient();
-        $client->request('POST', '/api/v1/notifications', [], [], ['CONTENT_TYPE' => 'application/json'], '{invalid}');
+        $client->request('POST', '/api/v1/notifications', [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X-API-Key' => 'test-api-key',
+        ], '{invalid}');
 
         self::assertResponseStatusCodeSame(400);
         self::assertResponseHeaderSame('content-type', 'application/problem+json');
@@ -31,7 +37,7 @@ final class NotificationControllerExtendedTest extends WebTestCase
         $client = static::createClient();
         $client->jsonRequest('POST', '/api/v1/notifications', [
             'recipient' => 'user@example.com',
-        ]);
+        ], ['HTTP_X-API-Key' => 'test-api-key']);
 
         self::assertResponseStatusCodeSame(400);
         self::assertResponseHeaderSame('content-type', 'application/problem+json');
@@ -45,12 +51,9 @@ final class NotificationControllerExtendedTest extends WebTestCase
             'channels' => ['email', 'sms', 'push'],
             'subject' => 'Multi',
             'body' => 'Multi-channel test',
-        ]);
+        ], ['HTTP_X-API-Key' => 'test-api-key']);
 
-        self::assertResponseIsSuccessful();
-
-        $data = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        self::assertCount(3, $data['deliveries']);
+        self::assertResponseStatusCodeSame(202);
     }
 
     public function testNotificationEndpointPreservesCustomRequestId(): void
@@ -61,16 +64,21 @@ final class NotificationControllerExtendedTest extends WebTestCase
             'channels' => ['email'],
             'subject' => 'Hello',
             'body' => 'World',
-        ], ['HTTP_X-Request-ID' => 'custom-request-id-123']);
+        ], [
+            'HTTP_X-Request-ID' => 'custom-request-id-123',
+            'HTTP_X-API-Key' => 'test-api-key',
+        ]);
 
-        self::assertResponseIsSuccessful();
+        self::assertResponseStatusCodeSame(202);
         self::assertResponseHeaderSame('x-request-id', 'custom-request-id-123');
     }
 
     public function testNotificationEndpointRejectsGetMethod(): void
     {
         $client = static::createClient();
-        $client->request('GET', '/api/v1/notifications');
+        $client->request('GET', '/api/v1/notifications', [], [], [
+            'HTTP_X-API-Key' => 'test-api-key',
+        ]);
 
         self::assertResponseStatusCodeSame(405);
     }

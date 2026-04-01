@@ -4,79 +4,73 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit;
 
-use App\Channel\ChannelInterface;
-use App\Contract\DTO\DeliveryResultDTO;
-use App\Contract\DTO\NotificationPayload;
 use App\Contract\DTO\NotificationRequestDTO;
-use App\Contract\Enum\Channel;
-use App\Contract\Exception\DeliveryException;
 use App\Infrastructure\Logger\NullLogger;
-use App\Router\ChannelRouter;
+use App\Infrastructure\Persistence\InMemoryNotificationRepository;
+use App\Message\SendNotificationMessage;
 use App\Service\NotificationDispatcher;
 use App\Validator\NotificationValidator;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 final class NotificationDispatcherTest extends TestCase
 {
-    public function testSendReturnsSentStatusWhenAllChannelsSucceed(): void
+    public function testSendQueuesNotificationAndReturnsQueuedStatus(): void
     {
+        $bus = new CollectingMessageBus();
+        $repository = new InMemoryNotificationRepository();
+
         $dispatcher = new NotificationDispatcher(
             new NotificationValidator(),
-            new ChannelRouter([new DispatchTestChannel(Channel::EMAIL)], new NullLogger()),
             new NullLogger(),
+            $repository,
+            $bus,
         );
 
         $result = $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email'], 'Hi', 'Body'));
 
-        self::assertSame('sent', $result->status);
-        self::assertCount(1, $result->deliveries);
-        self::assertSame('sent', $result->deliveries[0]->status);
+        self::assertSame('queued', $result->status);
+        self::assertSame([], $result->deliveries);
         self::assertMatchesRegularExpression('/^[0-9a-f\-]{36}$/', $result->id);
+        self::assertCount(1, $bus->dispatched);
+        self::assertInstanceOf(SendNotificationMessage::class, $bus->dispatched[0]);
+        self::assertSame($result->id, $bus->dispatched[0]->notificationId);
+        self::assertSame('test@example.com', $bus->dispatched[0]->recipient);
+        self::assertSame(['email'], $bus->dispatched[0]->channels);
     }
 
-    public function testSendReturnsPartialStatusWhenOneChannelFails(): void
+    public function testSendPersistsNotificationWithQueuedStatus(): void
     {
+        $bus = new CollectingMessageBus();
+        $repository = new InMemoryNotificationRepository();
+
         $dispatcher = new NotificationDispatcher(
             new NotificationValidator(),
-            new ChannelRouter([
-                new DispatchTestChannel(Channel::EMAIL),
-                new DispatchTestChannel(Channel::PUSH, true),
-            ], new NullLogger()),
             new NullLogger(),
+            $repository,
+            $bus,
         );
 
-        $result = $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email', 'push'], 'Hi', 'Body'));
+        $result = $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email'], 'Hi', 'Body'));
 
-        self::assertSame('partial', $result->status);
-        self::assertSame('sent', $result->deliveries[0]->status);
-        self::assertSame('failed', $result->deliveries[1]->status);
+        $found = $repository->findById($result->id);
+        self::assertNotNull($found);
+        self::assertSame('queued', $found['status']);
     }
 }
 
-final class DispatchTestChannel implements ChannelInterface
+/** @internal */
+final class CollectingMessageBus implements MessageBusInterface
 {
-    public function __construct(
-        private readonly Channel $name,
-        private readonly bool $shouldFail = false,
-    ) {
-    }
+    /** @var list<object> */
+    public array $dispatched = [];
 
-    public function getName(): Channel
+    /** @param array<mixed> $stamps */
+    public function dispatch(object $message, array $stamps = []): Envelope
     {
-        return $this->name;
-    }
+        $this->dispatched[] = $message;
 
-    public function send(NotificationPayload $payload): DeliveryResultDTO
-    {
-        if ($this->shouldFail) {
-            throw new DeliveryException('forced failure');
-        }
-
-        return new DeliveryResultDTO($this->name->value, 'sent', null, '2026-02-01T14:30:00Z');
-    }
-
-    public function isAvailable(): bool
-    {
-        return true;
+        return new Envelope($message);
     }
 }
