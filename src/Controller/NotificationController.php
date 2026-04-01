@@ -8,6 +8,7 @@ use App\Contract\DTO\NotificationRequestDTO;
 use App\Contract\Exception\NoAvailableChannelException;
 use App\Contract\Exception\UnsupportedChannelException;
 use App\Contract\Exception\ValidationException;
+use App\Contract\Interface\NotificationRepositoryInterface;
 use App\Contract\Interface\NotificationServiceInterface;
 use App\Service\Uuid;
 use JsonException;
@@ -18,8 +19,10 @@ use Throwable;
 
 final class NotificationController
 {
-    public function __construct(private readonly NotificationServiceInterface $notificationService)
-    {
+    public function __construct(
+        private readonly NotificationServiceInterface $notificationService,
+        private readonly NotificationRepositoryInterface $repository,
+    ) {
     }
 
     #[Route('/api/v1/notifications', name: 'app_notifications_send', methods: ['POST'])]
@@ -37,7 +40,7 @@ final class NotificationController
                 metadata: is_array($payload['metadata'] ?? null) ? $payload['metadata'] : null,
             ));
 
-            return $this->json($result->toArray(), JsonResponse::HTTP_OK, $requestId);
+            return $this->json($result->toArray(), JsonResponse::HTTP_ACCEPTED, $requestId);
         } catch (JsonException|ValidationException $exception) {
             return $this->problem('https://example.com/problems/validation-error', 'Validation error', JsonResponse::HTTP_BAD_REQUEST, $exception->getMessage(), $requestId);
         } catch (NoAvailableChannelException|UnsupportedChannelException $exception) {
@@ -81,6 +84,45 @@ final class NotificationController
         $response->headers->set('X-Request-ID', $requestId);
 
         return $response;
+    }
+
+    #[Route('/api/v1/notifications/{id}', name: 'app_notifications_show', methods: ['GET'])]
+    public function show(Request $request, string $id): JsonResponse
+    {
+        $requestId = $this->requestId($request);
+
+        try {
+            $notification = $this->repository->findById($id);
+
+            if ($notification === null) {
+                return $this->problem(
+                    'https://example.com/problems/not-found',
+                    'Not found',
+                    JsonResponse::HTTP_NOT_FOUND,
+                    sprintf('Notification "%s" not found.', $id),
+                    $requestId,
+                );
+            }
+
+            return $this->json([
+                'id' => $notification['id'],
+                'status' => $notification['status'],
+                'recipient' => $notification['recipient'],
+                'subject' => $notification['subject'],
+                'channels' => $notification['channels'],
+                'deliveries' => $notification['deliveries'],
+                'created_at' => $notification['created_at'],
+                'updated_at' => $notification['updated_at'],
+            ], JsonResponse::HTTP_OK, $requestId);
+        } catch (Throwable) {
+            return $this->problem(
+                'https://example.com/problems/internal-server-error',
+                'Internal server error',
+                JsonResponse::HTTP_INTERNAL_SERVER_ERROR,
+                'The notification could not be retrieved.',
+                $requestId,
+            );
+        }
     }
 
     private function requestId(Request $request): string

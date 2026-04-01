@@ -4,108 +4,58 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit;
 
-use App\Channel\ChannelInterface;
-use App\Contract\DTO\DeliveryResultDTO;
-use App\Contract\DTO\NotificationPayload;
 use App\Contract\DTO\NotificationRequestDTO;
-use App\Contract\Enum\Channel;
-use App\Contract\Exception\DeliveryException;
-use App\Contract\Exception\NoAvailableChannelException;
 use App\Contract\Exception\ValidationException;
 use App\Infrastructure\Logger\NullLogger;
-use App\Router\ChannelRouter;
+use App\Infrastructure\Persistence\InMemoryNotificationRepository;
 use App\Service\NotificationDispatcher;
 use App\Validator\NotificationValidator;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 final class NotificationDispatcherExtendedTest extends TestCase
 {
-    public function testSendReturnsFailedStatusWhenAllChannelsFail(): void
-    {
-        $dispatcher = new NotificationDispatcher(
-            new NotificationValidator(),
-            new ChannelRouter([new FailingChannel(Channel::EMAIL)], new NullLogger()),
-            new NullLogger(),
-        );
-
-        $result = $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email'], 'Hi', 'Body'));
-
-        self::assertSame('failed', $result->status);
-        self::assertCount(1, $result->deliveries);
-        self::assertSame('failed', $result->deliveries[0]->status);
-        self::assertNotNull($result->deliveries[0]->errorMessage);
-    }
-
-    public function testSendThrowsNoAvailableChannelExceptionWhenAllChannelsUnavailable(): void
-    {
-        $channel = new UnavailableChannel(Channel::EMAIL);
-        $dispatcher = new NotificationDispatcher(
-            new NotificationValidator(),
-            new ChannelRouter([$channel], new NullLogger()),
-            new NullLogger(),
-        );
-
-        $this->expectException(NoAvailableChannelException::class);
-
-        $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email'], 'Hi', 'Body'));
-    }
-
     public function testSendPropagatesValidationException(): void
     {
+        $bus = new class () implements MessageBusInterface {
+            /** @param array<mixed> $stamps */
+            public function dispatch(object $message, array $stamps = []): Envelope
+            {
+                return new Envelope($message);
+            }
+        };
+
         $dispatcher = new NotificationDispatcher(
             new NotificationValidator(),
-            new ChannelRouter([], new NullLogger()),
             new NullLogger(),
+            new InMemoryNotificationRepository(),
+            $bus,
         );
 
         $this->expectException(ValidationException::class);
 
         $dispatcher->send(new NotificationRequestDTO('test@example.com', ['invalid'], 'Hi', 'Body'));
     }
-}
 
-/** @internal */
-final class FailingChannel implements ChannelInterface
-{
-    public function __construct(private readonly Channel $name)
+    public function testSendQueuesMultipleChannels(): void
     {
-    }
+        $bus = new CollectingMessageBus();
 
-    public function getName(): Channel
-    {
-        return $this->name;
-    }
+        $dispatcher = new NotificationDispatcher(
+            new NotificationValidator(),
+            new NullLogger(),
+            new InMemoryNotificationRepository(),
+            $bus,
+        );
 
-    public function send(NotificationPayload $payload): DeliveryResultDTO
-    {
-        throw new DeliveryException('Channel unavailable');
-    }
+        $result = $dispatcher->send(new NotificationRequestDTO('test@example.com', ['email', 'sms', 'push'], 'Hi', 'Body'));
 
-    public function isAvailable(): bool
-    {
-        return true;
-    }
-}
+        self::assertSame('queued', $result->status);
+        self::assertCount(1, $bus->dispatched);
 
-/** @internal */
-final class UnavailableChannel implements ChannelInterface
-{
-    public function __construct(private readonly Channel $name)
-    {
-    }
-
-    public function getName(): Channel
-    {
-        return $this->name;
-    }
-
-    public function send(NotificationPayload $payload): DeliveryResultDTO
-    {
-        return new DeliveryResultDTO($this->name->value, 'sent');
-    }
-
-    public function isAvailable(): bool
-    {
-        return false;
+        $message = $bus->dispatched[0];
+        self::assertInstanceOf(\App\Message\SendNotificationMessage::class, $message);
+        self::assertSame(['email', 'sms', 'push'], $message->channels);
     }
 }

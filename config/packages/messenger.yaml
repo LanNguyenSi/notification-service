@@ -1,0 +1,6 @@
+framework:
+    messenger:
+        transports:
+            async: '%env(default:messenger_transport:MESSENGER_TRANSPORT_DSN)%'
+        routing:
+            'App\Message\SendNotificationMessage': async

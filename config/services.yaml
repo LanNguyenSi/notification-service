@@ -17,6 +17,15 @@ services:
     App\Contract\Interface\NotificationValidatorInterface: '@App\Validator\NotificationValidator'
     App\Contract\Interface\ChannelRouterInterface: '@App\Router\ChannelRouter'
     App\Contract\Interface\NotificationServiceInterface: '@App\Service\NotificationDispatcher'
+    App\Contract\Interface\NotificationRepositoryInterface: '@App\Infrastructure\Persistence\NotificationRepository'
+
+    App\Infrastructure\Persistence\NotificationRepository:
+        arguments:
+            $storagePath: '%kernel.project_dir%/var/notifications'
+
+    App\Security\ApiKeyAuthenticator:
+        arguments:
+            $apiKeys: '%env(default::API_KEYS)%'
 
     App\Channel\Email\SmtpClientInterface: '@App\Channel\Email\MockSmtpClient'
     App\Channel\SMS\SmsGatewayInterface: '@App\Channel\SMS\MockSmsGateway'
