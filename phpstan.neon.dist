@@ -8,6 +8,8 @@ parameters:
         - src
         - tests
     symfony:
-        container_xml_path: var/cache/test/App_KernelTestDebugContainer.xml
+        # phpstan-symfony 2.x renamed container_xml_path → containerXmlPath
+        # (camelCase). Keeping the old key silently disables the check.
+        containerXmlPath: var/cache/test/App_KernelTestDebugContainer.xml
     scanDirectories:
         - var/cache/test/Symfony/Config
